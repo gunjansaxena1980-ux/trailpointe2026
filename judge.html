@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Judge – Family Latent Show</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <div class="kicker">✦ TRAILPOINTE ✦</div>
+      <h1>Judges' Panel</h1>
+      <p id="judge_name">FAMILY LATENT SHOW</p>
+    </header>
+
+    <div id="error" class="card hidden"><p class="msg err" id="error_text"></p></div>
+
+    <!-- List of families -->
+    <div id="list_view" class="card hidden">
+      <h2>Performances</h2>
+      <p class="hint" id="progress"></p>
+      <div id="families"></div>
+    </div>
+
+    <!-- Scoring one family -->
+    <div id="score_view" class="card hidden" style="text-align:center">
+      <h2>Score this performance</h2>
+      <p style="font-size:20px;margin:6px 0"><b id="s_family"></b></p>
+      <p class="hint" id="s_perf"></p>
+      <div class="chips" id="s_buttons" style="justify-content:center;margin:20px 0"></div>
+      <div class="row">
+        <button class="btn ghost" id="s_back">Back</button>
+        <button class="btn" id="s_submit" disabled>Submit score</button>
+      </div>
+      <p class="hint" style="margin-top:12px">Scores can't be changed once submitted.</p>
+      <div class="msg" id="s_msg"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    const code = new URLSearchParams(location.search).get("code");
+    let families = [], scored = new Map(), current = null, picked = null;
+
+    const $ = id => document.getElementById(id);
+    function fail(text) { $("error_text").textContent = text; $("error").classList.remove("hidden"); }
+
+    async function init() {
+      if (!code) return fail("Please scan your personal judge QR code to open this page.");
+      const { data: name, error } = await db.rpc("judge_login", { p_code: code });
+      if (error || !name) return fail("This judge link isn't valid. Please ask the organisers for your QR code.");
+      $("judge_name").textContent = "NAMASTE, " + name.toUpperCase();
+      $("list_view").classList.remove("hidden");
+      await load();
+      setInterval(() => { if (!current) load(); }, 10000);   // pick up late registrations
+    }
+
+    async function load() {
+      const [f, s] = await Promise.all([
+        db.from("families").select("id, family_name, performance_name, category, category_other").order("created_at"),
+        db.rpc("judge_scored", { p_code: code })
+      ]);
+      if (f.error) return fail("Couldn't load families: " + f.error.message);
+      families = f.data || [];
+      scored = new Map((s.data || []).map(r => [r.family_id, r.score]));
+      renderList();
+    }
+
+    function renderList() {
+      $("progress").textContent = `You've scored ${scored.size} of ${families.length} families.`;
+      const box = $("families");
+      if (!families.length) { box.innerHTML = '<p class="hint">No families registered yet.</p>'; return; }
+      box.innerHTML = families.map(f => {
+        const done = scored.has(f.id);
+        return `<button class="family" data-id="${f.id}" ${done ? "disabled" : ""}>
+          <span><b>${esc(f.family_name)}</b><small>${esc(f.performance_name)} · ${esc(f.category_other || f.category)}</small></span>
+          <span class="badge ${done ? "done" : ""}">${done ? "Scored " + scored.get(f.id) : "Score →"}</span>
+        </button>`;
+      }).join("");
+      box.querySelectorAll(".family:not([disabled])").forEach(b => b.onclick = () => open(b.dataset.id));
+    }
+
+    function open(id) {
+      current = families.find(f => f.id === id); picked = null;
+      $("s_family").textContent = current.family_name;
+      $("s_perf").textContent = current.performance_name + " · " + (current.category_other || current.category);
+      $("s_msg").textContent = ""; $("s_submit").disabled = true;
+      const box = $("s_buttons"); box.innerHTML = "";
+      [7, 8, 9, 10].forEach(v => {
+        const b = document.createElement("button");
+        b.className = "chip big"; b.textContent = v;
+        b.onclick = () => { picked = v; [...box.children].forEach(c => c.classList.toggle("on", c === b)); $("s_submit").disabled = false; };
+        box.appendChild(b);
+      });
+      $("list_view").classList.add("hidden"); $("score_view").classList.remove("hidden");
+      window.scrollTo(0, 0);
+    }
+
+    function back() {
+      current = null;
+      $("score_view").classList.add("hidden"); $("list_view").classList.remove("hidden");
+      load();
+    }
+
+    $("s_back").onclick = back;
+    $("s_submit").onclick = async () => {
+      if (!picked || !current) return;
+      $("s_submit").disabled = true;
+      const { error } = await db.rpc("submit_score", { p_code: code, p_family: current.id, p_score: picked });
+      if (error) {
+        $("s_msg").className = "msg err"; $("s_msg").textContent = error.message;
+        if (!/already/i.test(error.message)) $("s_submit").disabled = false;
+        return;
+      }
+      $("s_msg").className = "msg ok"; $("s_msg").textContent = `Saved: ${picked} points.`;
+      setTimeout(back, 900);
+    };
+
+    init();
+  </script>
+</body>
+</html>

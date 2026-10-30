@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register – Family Latent Show</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <div class="kicker">✦ TRAILPOINTE ✦</div>
+      <h1>Family Latent Show</h1>
+      <p>DIWALI PARTY 2026 · REGISTRATION</p>
+    </header>
+
+    <form id="form" novalidate>
+      <div class="card">
+        <h2>Family details</h2>
+        <label for="family_name">Family name</label>
+        <input type="text" id="family_name" required maxlength="80">
+
+        <label>Number of family members</label>
+        <div class="chips" id="count"></div>
+      </div>
+
+      <div class="card">
+        <h2>Meet your family members</h2>
+        <p class="hint">Please complete the hobbies and personality details for each participating family member.</p>
+        <div id="members"></div>
+      </div>
+
+      <div class="card">
+        <h2>Performance details</h2>
+        <label for="performance_name">Performance name</label>
+        <input type="text" id="performance_name" required maxlength="120">
+
+        <label>Performance category</label>
+        <div class="chips" id="category"></div>
+        <input type="text" id="category_other" class="hidden" placeholder="Tell us what it is" maxlength="60" style="margin-top:10px">
+      </div>
+
+      <div class="card secret">
+        <h2>🔒 Your secret score</h2>
+        <p class="hint">How do you think the judges will score you? This stays hidden. The family whose score is closest to the judges' average wins!</p>
+        <div class="chips" id="score"></div>
+      </div>
+
+      <button class="btn" id="submit" type="submit">Register our family</button>
+      <div class="msg" id="msg"></div>
+    </form>
+
+    <div id="done" class="card hidden" style="text-align:center">
+      <h2>✦ Let the celebration begin! ✦</h2>
+      <p>You're registered, <b id="done_name"></b>. Your secret score is sealed 🔒</p>
+      <button class="btn ghost" onclick="location.reload()">Register another family</button>
+    </div>
+
+    <div class="footer">Wishing everyone a joyful and memorable Diwali! • Trailpointe 2026</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    const state = { count: null, category: null, score: null };
+
+    function chips(el, values, key, onPick) {
+      el.innerHTML = "";
+      values.forEach(v => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "chip"; b.textContent = v;
+        b.onclick = () => {
+          state[key] = v;
+          [...el.children].forEach(c => c.classList.toggle("on", c === b));
+          onPick && onPick(v);
+        };
+        el.appendChild(b);
+      });
+    }
+
+    function renderMembers(n) {
+      const box = document.getElementById("members");
+      const old = [...box.querySelectorAll(".member")].map(m => ({
+        name: m.querySelector(".m-name").value,
+        hobbies: m.querySelector(".m-hobbies").value,
+        personality: m.querySelector(".m-personality").value
+      }));
+      box.innerHTML = "";
+      for (let i = 0; i < n; i++) {
+        const d = document.createElement("div");
+        d.className = "member";
+        d.innerHTML = `
+          <div class="num">Member ${i + 1}</div>
+          <label>Name</label><input type="text" class="m-name" maxlength="60">
+          <label>Hobbies &amp; interests</label><textarea class="m-hobbies" maxlength="300"></textarea>
+          <label>How would you describe your personality?</label><textarea class="m-personality" maxlength="300"></textarea>`;
+        if (old[i]) {
+          d.querySelector(".m-name").value = old[i].name;
+          d.querySelector(".m-hobbies").value = old[i].hobbies;
+          d.querySelector(".m-personality").value = old[i].personality;
+        }
+        box.appendChild(d);
+      }
+    }
+
+    chips(document.getElementById("count"), [2, 3, 4, 5], "count", renderMembers);
+    chips(document.getElementById("category"), ["Singing", "Dancing", "Acting", "Comedy", "Other"], "category",
+      v => document.getElementById("category_other").classList.toggle("hidden", v !== "Other"));
+    chips(document.getElementById("score"), [7, 7.5, 8, 8.5, 9, 9.5, 10], "score");
+    document.getElementById("members").innerHTML = '<p class="hint">Choose the number of family members above.</p>';
+
+    const msg = document.getElementById("msg");
+    document.getElementById("form").onsubmit = async (e) => {
+      e.preventDefault();
+      msg.className = "msg err";
+      const family_name = document.getElementById("family_name").value.trim();
+      const performance_name = document.getElementById("performance_name").value.trim();
+      const category_other = document.getElementById("category_other").value.trim();
+      const members = [...document.querySelectorAll(".member")].map(m => ({
+        name: m.querySelector(".m-name").value.trim(),
+        hobbies: m.querySelector(".m-hobbies").value.trim(),
+        personality: m.querySelector(".m-personality").value.trim()
+      }));
+
+      if (!family_name) return msg.textContent = "Please enter your family name.";
+      if (!state.count) return msg.textContent = "Please choose the number of family members.";
+      if (members.some(m => !m.name)) return msg.textContent = "Please enter a name for every family member.";
+      if (!performance_name) return msg.textContent = "Please enter your performance name.";
+      if (!state.category) return msg.textContent = "Please choose a performance category.";
+      if (state.category === "Other" && !category_other) return msg.textContent = "Please describe your 'Other' category.";
+      if (state.score === null) return msg.textContent = "Please choose your secret score.";
+
+      const btn = document.getElementById("submit");
+      btn.disabled = true; msg.className = "msg"; msg.textContent = "Saving…";
+
+      const { error } = await db.from("families").insert({
+        id: crypto.randomUUID(),
+        family_name, member_count: state.count, members, performance_name,
+        category: state.category,
+        category_other: state.category === "Other" ? category_other : null,
+        self_score: state.score
+      });
+
+      btn.disabled = false;
+      if (error) {
+        msg.className = "msg err";
+        msg.textContent = "Something went wrong, please try again. (" + error.message + ")";
+        return;
+      }
+      document.getElementById("form").classList.add("hidden");
+      document.getElementById("done_name").textContent = family_name;
+      document.getElementById("done").classList.remove("hidden");
+      window.scrollTo(0, 0);
+    };
+  </script>
+</body>
+</html>

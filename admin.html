@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Organiser – Family Latent Show</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap wide">
+    <header class="brand no-print">
+      <div class="kicker">✦ TRAILPOINTE ✦</div>
+      <h1>Organiser Dashboard</h1>
+      <p>FAMILY LATENT SHOW · DIWALI 2026</p>
+    </header>
+
+    <div id="login" class="card" style="max-width:420px;margin:0 auto">
+      <h2>Sign in</h2>
+      <label for="pw">Admin password</label>
+      <input type="password" id="pw" autocomplete="current-password">
+      <button class="btn" id="go" style="margin-top:14px">Open dashboard</button>
+      <div class="msg err" id="login_msg"></div>
+    </div>
+
+    <div id="dash" class="hidden">
+      <div class="card no-print">
+        <h2>Results</h2>
+        <p class="hint">Ranked by how close each family's secret score is to the judges' average. Refreshes every 10 seconds.</p>
+        <div class="row" style="margin-bottom:12px">
+          <button class="btn ghost" id="reveal">🔒 Reveal secret scores</button>
+          <button class="btn ghost" id="refresh">Refresh now</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>#</th><th>Family</th><th>Performance</th><th>Judges</th>
+              <th>Judges' avg</th><th>Secret score</th><th>Difference</th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="no-print">QR codes to print</h2>
+        <p class="hint no-print">One registration code for families, and a personal code for each judge. Keep judge codes private — anyone with a judge's code can score as that judge.</p>
+        <button class="btn ghost no-print" onclick="window.print()" style="margin-bottom:14px">Print QR codes</button>
+        <div class="qr-grid" id="qrs"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="config.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const base = location.href.replace(/admin\.html.*$/, "").replace(/[?#].*$/, "");
+    let pw = "", revealed = false, timer = null;
+
+    $("go").onclick = signIn;
+    $("pw").onkeydown = e => { if (e.key === "Enter") signIn(); };
+
+    async function signIn() {
+      pw = $("pw").value;
+      const { data, error } = await db.rpc("get_judges", { p_password: pw });
+      if (error) { $("login_msg").textContent = "Wrong password."; return; }
+      $("login").classList.add("hidden"); $("dash").classList.remove("hidden");
+      renderQRs(data || []);
+      loadResults();
+      timer = setInterval(loadResults, 10000);
+    }
+
+    function fmt(n) { return n === null || n === undefined ? "–" : (+n).toFixed(2); }
+
+    async function loadResults() {
+      const { data, error } = await db.rpc("get_results", { p_password: pw });
+      if (error) { $("rows").innerHTML = `<tr><td colspan="7">${esc(error.message)}</td></tr>`; return; }
+      // Until reveal, list alphabetically so the order doesn't give away the winner
+      if (!revealed) data.sort((a, b) => a.family_name.localeCompare(b.family_name));
+      const scoredRows = data.filter(r => r.judge_count > 0);
+      const best = scoredRows.length ? Math.min(...scoredRows.map(r => +r.difference)) : null;
+      $("rows").innerHTML = data.map((r, i) => {
+        const win = revealed && r.judge_count > 0 && Math.abs(+r.difference - best) < 1e-9;
+        const exact = r.judge_count > 0 && +r.difference === 0;
+        const secret = revealed ? "" : "blur";
+        return `<tr class="${win ? "winner" : ""}">
+          <td>${r.judge_count ? i + 1 : "–"}</td>
+          <td><b>${esc(r.family_name)}</b> ${win ? '<span class="badge win">🏆 Winner</span>' : ""}</td>
+          <td>${esc(r.performance_name)}<br><small style="color:var(--muted)">${esc(r.category)}</small></td>
+          <td>${r.judge_count} / 6</td>
+          <td>${fmt(r.judge_avg)}</td>
+          <td class="${secret}">${fmt(r.self_score)}</td>
+          <td class="${secret}">${fmt(r.difference)}${revealed && exact ? " 🎯" : ""}</td>
+        </tr>`;
+      }).join("") || '<tr><td colspan="7">No families registered yet.</td></tr>';
+      if (!revealed) [...$("rows").children].forEach(tr => tr.firstElementChild && (tr.firstElementChild.textContent = "–"));
+    }
+
+    $("reveal").onclick = () => {
+      revealed = !revealed;
+      $("reveal").textContent = revealed ? "🙈 Hide secret scores" : "🔒 Reveal secret scores";
+      loadResults();
+    };
+    $("refresh").onclick = loadResults;
+
+    function qrCard(title, url) {
+      const d = document.createElement("div");
+      d.className = "qr";
+      const holder = document.createElement("div");
+      d.appendChild(holder);
+      new QRCode(holder, { text: url, width: 160, height: 160 });
+      d.insertAdjacentHTML("beforeend", `<b>${esc(title)}</b><small>${esc(url)}</small>`);
+      return d;
+    }
+
+    function renderQRs(judges) {
+      const box = $("qrs"); box.innerHTML = "";
+      box.appendChild(qrCard("Family Registration", base + "register.html"));
+      judges.forEach(j => box.appendChild(qrCard(j.name, base + "judge.html?code=" + encodeURIComponent(j.code))));
+    }
+  </script>
+</body>
+</html>
